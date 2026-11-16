@@ -22,6 +22,7 @@ const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 4096 });
 const players = new Map();           // id -> player
 let nextId = 1, colorIdx = 0, hostId = null;
 let music = { mode: 'beat', vid: '', t0: Date.now() };   // mode: beat | off | yt
+let lights = true;                                        // den chieu: chung cho ca phong
 
 const send = (ws, o) => { if (ws.readyState === 1) ws.send(JSON.stringify(o)); };
 const broadcast = (o, exceptId) => { const s = JSON.stringify(o); for (const p of players.values()) if (p.id !== exceptId && p.ws.readyState === 1) p.ws.send(s); };
@@ -46,7 +47,7 @@ function leave(p) {
     hostId = next ? next.id : null;
     if (next) broadcast({ t: 'host', id: next.id });
   }
-  if (!players.size) music = { mode: 'beat', vid: '', t0: Date.now() };
+  if (!players.size) { music = { mode: 'beat', vid: '', t0: Date.now() }; lights = true; }
 }
 
 wss.on('connection', ws => {
@@ -60,9 +61,9 @@ wss.on('connection', ws => {
     if (!me) {                                   // chua vao phong: chi nhan 'join'
       if (m.t !== 'join') return;
       if (players.size >= MAX_PLAYERS) { send(ws, { t: 'err', msg: 'Quán đã đầy, thử lại sau nhé' }); return ws.close(); }
-      me = { id: nextId++, ws, name: cleanName(m.name), col: COLORS[colorIdx++ % COLORS.length], x: -1, z: -1, h: 0, seat: -1, mv: 0, chatT: [], stT: [] };
+      me = { id: nextId++, ws, name: cleanName(m.name), col: COLORS[colorIdx++ % COLORS.length], x: -1, z: -1, h: 0, seat: -1, mv: 0, chatT: [], stT: [], lgT: [] };
       if (hostId === null) hostId = me.id;       // nguoi dau tien = host
-      send(ws, { t: 'welcome', id: me.id, name: me.name, host: hostId, now: Date.now(), music, players: [...players.values()].map(pub) });
+      send(ws, { t: 'welcome', id: me.id, name: me.name, host: hostId, now: Date.now(), music, lights, players: [...players.values()].map(pub) });
       players.set(me.id, me);
       broadcast({ t: 'join', p: pub(me) }, me.id);
       return;
@@ -82,6 +83,12 @@ wss.on('connection', ws => {
         const txt = String(m.txt || '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 80);
         if (!txt) return;
         broadcast({ t: 'chat', id: me.id, txt, big: !!m.big && [...txt].length <= 4 }, me.id);
+        break;
+      }
+      case 'lights': {                           // ai cung bat/tat duoc, ca phong cung doi
+        me.lgT = me.lgT.filter(x => now - x < 2000); if (me.lgT.length >= 3) return; me.lgT.push(now);
+        lights = !!m.on;
+        broadcast({ t: 'lights', on: lights, by: me.name });
         break;
       }
       case 'smk': broadcast({ t: 'smk', id: me.id }, me.id); break;
